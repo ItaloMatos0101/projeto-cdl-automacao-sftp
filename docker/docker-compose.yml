@@ -1,0 +1,12 @@
+services:
+  sftp-origem: # Nome do primeiro container (simula o servidor de onde os arquivos saem)
+    image: atmoz/sftp:latest # Usa uma imagem Docker pronta e leve, feita especificamente para subir servidores SFTP rápidos
+    ports:
+      - "2221:22" # Mapeamento de portas (Rede Direcionada): A porta 22 (padrão SSH/SFTP) de dentro do container responderá na porta 2221 do seu localhost (PC)
+    command: user_src:pass_src:::upload # Parâmetro específico dessa imagem. Sintaxe: usuário : senha : id_usuario : id_grupo : nome_da_pasta. Cria o usuário e a pasta "/upload".
+
+  sftp-destino: # Nome do segundo container (simula o servidor que vai receber os arquivos organizados)
+    image: atmoz/sftp:latest
+    ports:
+      - "2222:22" # Mapeia a porta 22 deste container para a porta 2222 do seu PC, evitando conflito com o primeiro container
+    command: user_dest:pass_dest:::incoming # Cria o usuário de destino e a pasta "/incoming"
