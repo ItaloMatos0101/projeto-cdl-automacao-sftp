@@ -3,6 +3,7 @@ import os
 import re
 import json
 import shutil
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Carrega as variáveis de ambiente
@@ -19,54 +20,59 @@ def garantir_pastas_locais():
     os.makedirs(PASTA_PROCESSADOS, exist_ok=True)
     os.makedirs("./logs", exist_ok=True)
 
-def arquivo_ja_processado(cdl, filiada, hash_arquivo):
-    """Verifica se o arquivo já consta na memória local para evitar re-downloads."""
-    prefixo = f"{cdl}_{filiada}"
+def extrair_sequencial_do_txt(caminho_arquivo):
+    """Lê a primeira linha do TXT e extrai o sequencial numérico que vem antes da letra 'E' (ex: 006442E -> 6442)."""
+    try:
+        with open(caminho_arquivo, 'r', encoding='latin-1') as f:
+            primeira_linha = f.readline()
+            
+        # Procura por números seguidos da letra 'E' na primeira linha
+        match = re.search(r'(\d+)[E]', primeira_linha)
+        if match:
+            codigo_bruto = match.group(1)
+            # Remove os zeros à esquerda para limpar (ex: 006442 vira 6442)
+            return str(int(codigo_bruto))
+    except Exception as e:
+        print(f"⚠️ Erro ao ler o conteúdo interno do arquivo para extrair o sequencial: {e}")
+    return None
+
+def arquivo_ja_processado(nome_arquivo):
+    """Verifica na memória se o arquivo original já foi processado."""
     if not os.path.exists(ARQUIVO_ESTADO):
         return False
     
     try:
-        with open(ARQUIVO_ESTADO, 'r') as f:
+        with open(ARQUIVO_ESTADO, 'r', encoding='utf-8') as f:
             estado = json.load(f)
-        if prefixo in estado and isinstance(estado[prefixo], dict):
-            if hash_arquivo in estado[prefixo].get("historico_arquivos", {}):
-                return True
+        return nome_arquivo in estado.get("arquivos_processados", [])
     except Exception:
-        pass
-    return False
+        # Se o arquivo estiver vazio ou corrompido, retorna False para evitar crash
+        return False
 
-def obter_novo_sequencial(cdl, filiada, hash_arquivo):
-    """Garante o sequencial correto e registra arquivos novos."""
-    prefixo = f"{cdl}_{filiada}"
+def registrar_arquivo_processado(nome_arquivo):
+    """Salva o arquivo original na memória para evitar reprocessamento (com proteção contra JSON vazio)."""
+    estado = {"arquivos_processados": []}
     
     if os.path.exists(ARQUIVO_ESTADO):
-        with open(ARQUIVO_ESTADO, 'r') as f:
-            estado = json.load(f)
-    else:
-        estado = {}
+        try:
+            with open(ARQUIVO_ESTADO, 'r', encoding='utf-8') as f:
+                conteudo = json.load(f)
+                if isinstance(conteudo, dict):
+                    estado = conteudo
+        except Exception:
+            # Se corrompido/vazio, inicia com a estrutura padrão limpa
+            pass
         
-    if prefixo not in estado or not isinstance(estado[prefixo], dict):
-        estado[prefixo] = {
-            "ultimo_sequencial": -1,
-            "historico_arquivos": {}
-        }
+    if "arquivos_processados" not in estado:
+        estado["arquivos_processados"] = []
         
-    dados_parceira = estado[prefixo]
-
-    if hash_arquivo in dados_parceira["historico_arquivos"]:
-        numero_final = dados_parceira["historico_arquivos"][hash_arquivo]
-    else:
-        dados_parceira["ultimo_sequencial"] += 1
-        numero_final = dados_parceira["ultimo_sequencial"]
-        dados_parceira["historico_arquivos"][hash_arquivo] = numero_final
-        
-        with open(ARQUIVO_ESTADO, 'w') as f:
+    if nome_arquivo not in estado["arquivos_processados"]:
+        estado["arquivos_processados"].append(nome_arquivo)
+        with open(ARQUIVO_ESTADO, 'w', encoding='utf-8') as f:
             json.dump(estado, f, indent=4)
-            
-    return f"{numero_final:04d}"
 
 def fase1_download():
-    """Conecta na origem e baixa apenas arquivos que NUNCA foram processados."""
+    """Conecta na origem e baixa apenas os arquivos modificados HOJE que ainda não foram processados."""
     host = os.getenv("SRC_HOST")
     port = int(os.getenv("SRC_PORT"))
     user = os.getenv("SRC_USER")
@@ -74,36 +80,43 @@ def fase1_download():
     remote_dir = os.getenv("SRC_DIR")
     
     print(f"\n[FASE 1] Conectando ao servidor de ORIGEM ({host}:{port})...")
+    hoje = datetime.now().date()
     
     try:
         transport = paramiko.Transport((host, port))
         transport.connect(username=user, password=password)
         sftp = paramiko.SFTPClient.from_transport(transport)
         
-        arquivos_no_servidor = sftp.listdir(remote_dir)
+        arquivos_detalhados = sftp.listdir_attr(remote_dir)
         
-        if not arquivos_no_servidor:
+        if not arquivos_detalhados:
             print("⚠️ A pasta remota da origem está vazia.")
         else:
-            print(f"📦 Analisando {len(arquivos_no_servidor)} arquivo(s) na Origem...")
-            padrao_original = re.compile(r"^(\d+)_(\d+)_(.+$)")
+            print(f"📦 Analisando {len(arquivos_detalhados)} arquivo(s) na Origem...")
+            baixados_contador = 0
             
-            for nome_arquivo in arquivos_no_servidor:
-                match = padrao_original.match(nome_arquivo)
+            for attr in arquivos_detalhados:
+                nome_arquivo = attr.filename
                 
-                # Regra de Pulo: Verifica se já processamos este arquivo
-                if match:
-                    cdl, filiada, hash_arquivo = match.groups()
-                    if arquivo_ja_processado(cdl, filiada, hash_arquivo):
-                        print(f"⏩ Ignorado (Já está na base de dados local): {nome_arquivo}")
-                        continue
+                # Verifica a data de modificação do arquivo no servidor remoto
+                data_modificacao = datetime.fromtimestamp(attr.st_mtime).date()
                 
-                # Download normal para novos arquivos
+                if data_modificacao != hoje:
+                    print(f"⏩ Ignorado (Data anterior a hoje): {nome_arquivo} ({data_modificacao})")
+                    continue
+                
+                if arquivo_ja_processado(nome_arquivo):
+                    print(f"⏩ Ignorado (Já processado anteriormente): {nome_arquivo}")
+                    continue
+                
                 remote_path = f"{remote_dir}/{nome_arquivo}"
                 local_path = os.path.join(PASTA_TEMP, nome_arquivo)
                 
                 sftp.get(remote_path, local_path)
-                print(f"⬇️ Baixado NOVO arquivo: {nome_arquivo}")
+                print(f"⬇️ Baixado arquivo de HOJE: {nome_arquivo}")
+                baixados_contador += 1
+                
+            print(f"📥 Total de novos arquivos baixados: {baixados_contador}")
                 
         sftp.close()
         transport.close()
@@ -114,14 +127,14 @@ def fase1_download():
         return False
 
 def fase2_renomear():
-    """Aplica o sequencial aos arquivos recém baixados e salva backup local."""
+    """Extrai CDL e Filiada do nome, o sequencial de dentro do TXT, e renomeia para CDL_FILIADA_SEQ_HASH."""
     arquivos = os.listdir(PASTA_TEMP)
     if not arquivos:
         return
 
     print(f"\n[FASE 2] Iniciando renomeação e backup local de {len(arquivos)} arquivo(s)...")
     
-    padrao_ja_renomeado = re.compile(r"^\d+_\d+_\d{4}_.+$")
+    padrao_ja_renomeado = re.compile(r"^\d+_\d+_\d+_.+$")
     padrao_original = re.compile(r"^(\d+)_(\d+)_(.+$)")
     
     for nome_original in arquivos:
@@ -133,23 +146,34 @@ def fase2_renomear():
         match = padrao_original.match(nome_original)
         
         if match:
-            cdl, filiada, hash_arquivo = match.groups()
+            cdl = match.group(1)          # Ex: 1501
+            filiada = match.group(2)      # Ex: 100358
+            hash_arquivo = match.group(3) # Ex: 2026091500001
             
-            sequencial = obter_novo_sequencial(cdl, filiada, hash_arquivo)
-            novo_nome = f"{cdl}_{filiada}_{sequencial}_{hash_arquivo}"
-            caminho_novo = os.path.join(PASTA_TEMP, novo_nome)
+            # Extrai o sequencial de dentro do arquivo TXT (ex: 6442)
+            sequencial = extrair_sequencial_do_txt(caminho_antigo)
             
-            os.replace(caminho_antigo, caminho_novo)
-            print(f"✅ Renomeado: {nome_original} ➔ {novo_nome}")
-            
-            caminho_backup = os.path.join(PASTA_PROCESSADOS, novo_nome)
-            shutil.copy2(caminho_novo, caminho_backup)
-            
+            if sequencial:
+                # Formato final correto: 1501_100358_6442_2026091500001
+                novo_nome = f"{cdl}_{filiada}_{sequencial}_{hash_arquivo}"
+                caminho_novo = os.path.join(PASTA_TEMP, novo_nome)
+                
+                os.replace(caminho_antigo, caminho_novo)
+                print(f"✅ Renomeado: {nome_original} ➔ {novo_nome} (Sequencial interno: {sequencial})")
+                
+                # Salva backup na pasta de controle local
+                caminho_backup = os.path.join(PASTA_PROCESSADOS, novo_nome)
+                shutil.copy2(caminho_novo, caminho_backup)
+                
+                # Registra na memória local que este arquivo original foi processado
+                registrar_arquivo_processado(nome_original)
+            else:
+                print(f"⚠️ Falha ao extrair o sequencial interno do arquivo: {nome_original}")
         else:
-            print(f"⚠️ Padrão desconhecido: {nome_original}")
+            print(f"⚠️ O arquivo '{nome_original}' não segue o padrão esperado de nome.")
 
 def fase3_upload_e_limpeza():
-    """Envia os arquivos usando sobrescrita segura e limpa a pasta local temp."""
+    """Envia os arquivos renomeados para o destino e limpa a pasta local temp."""
     host_dest = os.getenv("DEST_HOST")
     port_dest = int(os.getenv("DEST_PORT"))
     user_dest = os.getenv("DEST_USER")
@@ -168,7 +192,7 @@ def fase3_upload_e_limpeza():
         trans_dest.connect(username=user_dest, password=pass_dest)
         sftp_dest = paramiko.SFTPClient.from_transport(trans_dest)
 
-        padrao_renomeado = re.compile(r"^\d+_\d+_\d{4}_.+$")
+        padrao_renomeado = re.compile(r"^\d+_\d+_\d+_.+$")
 
         for nome_arquivo in arquivos_temp:
             caminho_local = os.path.join(PASTA_TEMP, nome_arquivo)
@@ -180,13 +204,11 @@ def fase3_upload_e_limpeza():
                 print(f"⬆️ Enviando: {nome_arquivo} (como .tmp)...")
                 sftp_dest.put(caminho_local, path_remoto_tmp)
 
-                # Tenta remover o arquivo no destino para evitar o erro 'Failure' ao renomear por cima
                 try:
                     sftp_dest.remove(path_remoto_final)
                 except IOError:
-                    pass # Se não existir, segue o fluxo normalmente
+                    pass
 
-                # Efetiva a entrega atômica
                 sftp_dest.rename(path_remoto_tmp, path_remoto_final)
                 print(f"🚀 Upload concluído: {nome_arquivo}")
 
