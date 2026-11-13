@@ -5,7 +5,7 @@ import re
 # Diretórios e Arquivos Globais
 PASTA_TEMP = "./temp"
 PASTA_PROCESSADOS = "./processados"
-ARQUIVO_ESTADO = "./logs/contador.json"
+ARQUIVO_ESTADO = "./logs/historico.json"
 
 def garantir_pastas_locais():
     """Garante a existência das pastas de trabalho."""
