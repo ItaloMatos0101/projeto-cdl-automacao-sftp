@@ -21,11 +21,11 @@ def carregar_memoria_processados():
 
 def fase1_download():
     """Conecta na origem, filtra na RAM e baixa apenas arquivos brutos inéditos de forma silenciosa."""
-    host = os.getenv("SRC_HOST")
-    port = int(os.getenv("SRC_PORT"))
-    user = os.getenv("SRC_USER")
-    password = os.getenv("SRC_PASS")
-    remote_dir = os.getenv("SRC_DIR")
+    host = os.getenv("EQUA_HOST")
+    port = int(os.getenv("EQUA_PORT"))
+    user = os.getenv("EQUA_USER")
+    password = os.getenv("EQUA_PASS")
+    remote_dir = os.getenv("EQUA-MA_DIR")
 
     print(f"\n[FASE 1] Conectando ao servidor de ORIGEM ({host}:{port})...")
 

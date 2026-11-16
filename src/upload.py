@@ -6,7 +6,7 @@ from state_manager import PASTA_TEMP
 
 load_dotenv()
 
-def fase3_upload_e_limpeza():
+def fase3_upload():
     """Envia os arquivos para o destino (.tmp -> rename) e limpa a pasta temp local."""
     host_dest = os.getenv("DEST_HOST")
     port_dest = int(os.getenv("DEST_PORT"))
