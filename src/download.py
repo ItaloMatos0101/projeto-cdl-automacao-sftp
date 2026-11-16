@@ -2,6 +2,7 @@ import os
 import re
 import json
 import paramiko
+from ftplib import FTP
 from dotenv import load_dotenv
 from state_manager import PASTA_TEMP, ARQUIVO_ESTADO
 
@@ -22,7 +23,7 @@ def carregar_memoria_processados():
 def fase1_download():
     """Conecta na origem, filtra na RAM e baixa apenas arquivos brutos inéditos de forma silenciosa."""
     host = os.getenv("EQUA_HOST")
-    port = int(os.getenv("EQUA_PORT"))
+    port = int(os.getenv("EQUA_PORT","21"))
     user = os.getenv("EQUA_USER")
     password = os.getenv("EQUA_PASS")
     remote_dir = os.getenv("EQUA-MA_DIR")
@@ -36,11 +37,14 @@ def fase1_download():
     arquivos_ja_processados = carregar_memoria_processados()
 
     try:
-        transport = paramiko.Transport((host, port))
-        transport.connect(username=user, password=password)
-        sftp = paramiko.SFTPClient.from_transport(transport)
+        ftp = FTP()
+        #ftp.set_debuglevel(2)  # Exibe cada comando e resposta do servidor no terminal
+        ftp.connect(host, port, timeout=30)
+        ftp.login(user=user, passwd=password)
+        #ftp.set_pasv(False)    # Força o Modo Ativo caso as portas passivas estejam bloqueadas
+        ftp.cwd(remote_dir)
 
-        arquivos_no_servidor = sftp.listdir(remote_dir)
+        arquivos_no_servidor = ftp.nlst()
 
         if not arquivos_no_servidor:
             print("⚠️ A pasta remota da origem está vazia.")
@@ -53,8 +57,8 @@ def fase1_download():
             ign_historico = 0
             baixados = 0
 
-            for nome_arquivo in arquivos_no_servidor:
-                
+            for item in arquivos_no_servidor:
+                nome_arquivo = os.path.basename(item)
                 if padrao_ja_renomeado.match(nome_arquivo):
                     ign_renomeado += 1
                     continue
@@ -69,10 +73,12 @@ def fase1_download():
                     continue
 
                 # Se é novo, faz o download e avisa na tela
-                remote_path = f"{remote_dir}/{nome_arquivo}"
+                #remote_path = f"{remote_dir}/{nome_arquivo}"
                 local_path = os.path.join(PASTA_TEMP, nome_arquivo)
 
-                sftp.get(remote_path, local_path)
+                with open(local_path, "wb") as arquivo_local:
+                    ftp.retrbinary(f"RETR {nome_arquivo}", arquivo_local.write)
+
                 print(f"⬇️ Baixado NOVO arquivo: {nome_arquivo}")
                 baixados += 1
 
@@ -87,8 +93,7 @@ def fase1_download():
             if baixados == 0:
                 print("✅ Nenhum arquivo novo pendente de download.")
 
-        sftp.close()
-        transport.close()
+        ftp.quit()
         return True
 
     except Exception as e:
