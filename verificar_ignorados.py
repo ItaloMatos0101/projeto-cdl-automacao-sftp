@@ -1,14 +1,12 @@
 import os
 import re
 import json
-import paramiko
+from ftplib import FTP
 from dotenv import load_dotenv
 
-# Carrega as variáveis de ambiente
 load_dotenv()
 
-# Caminho do arquivo de controle
-ARQUIVO_ESTADO = "./logs/contador.json"
+ARQUIVO_ESTADO = "./logs/historico.json"
 
 def carregar_memoria_processados():
     """Carrega a lista do JSON para a memória RAM."""
@@ -22,13 +20,13 @@ def carregar_memoria_processados():
         return set()
 
 def inspecionar_origem():
-    host = os.getenv("SRC_HOST")
-    port = int(os.getenv("SRC_PORT"))
-    user = os.getenv("SRC_USER")
-    password = os.getenv("SRC_PASS")
-    remote_dir = os.getenv("SRC_DIR")
+    host = os.getenv("EQUA_HOST")
+    port = int(os.getenv("EQUA_PORT", "21"))
+    user = os.getenv("EQUA_USER")
+    password = os.getenv("EQUA_PASS")
+    remote_dir = os.getenv("EQUA-MA_DIR")
 
-    print(f"\n🔍 [AUDITORIA] Conectando ao servidor de ORIGEM ({host}:{port}) para inspecionar arquivos...")
+    print(f"\n🔍 [AUDITORIA] Conectando ao servidor de ORIGEM via FTP ({host}:{port}) para inspecionar arquivos...")
 
     padrao_ja_renomeado = re.compile(r"^(\d+)_(\d+)_(\d+)_(.+)$")
     padrao_bruto_valido = re.compile(r"^(\d+)_(\d+)_([^_]+)$")
@@ -36,11 +34,17 @@ def inspecionar_origem():
     arquivos_ja_processados = carregar_memoria_processados()
 
     try:
-        transport = paramiko.Transport((host, port))
-        transport.connect(username=user, password=password)
-        sftp = paramiko.SFTPClient.from_transport(transport)
+        ftp = FTP()
+        ftp.connect(host, port, timeout=30)
+        ftp.login(user=user, passwd=password)
+        ftp.set_pasv(False)  # Mantém o mesmo modo ativo configurado no download.py
+        ftp.cwd(remote_dir)
 
-        arquivos_no_servidor = sftp.listdir(remote_dir)
+        arquivos_no_servidor = [
+            os.path.basename(item)
+            for item in ftp.nlst()
+            if os.path.basename(item) not in (".", "..")
+        ]
 
         if not arquivos_no_servidor:
             print("⚠️ A pasta remota da origem está vazia.")
@@ -82,11 +86,13 @@ def inspecionar_origem():
             print(f"   • Novos / Pendentes de envio : {contadores['pendentes']}")
             print("=" * 80)
 
-        sftp.close()
-        transport.close()
+        try:
+            ftp.quit()
+        except Exception:
+            ftp.close()
 
     except Exception as e:
         print(f"❌ [ERRO na Auditoria]: {e}")
 
 if __name__ == "__main__":
-    inspecionar_origem()    
+    inspecionar_origem()

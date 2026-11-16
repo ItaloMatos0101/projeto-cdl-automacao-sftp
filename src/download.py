@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import paramiko
 from ftplib import FTP
 from dotenv import load_dotenv
 from state_manager import PASTA_TEMP, ARQUIVO_ESTADO
@@ -15,15 +14,14 @@ def carregar_memoria_processados():
     try:
         with open(ARQUIVO_ESTADO, 'r', encoding='utf-8') as f:
             estado = json.load(f)
-            # O 'set' (conjunto) faz buscas em O(1), sendo milhares de vezes mais rápido que uma lista normal
             return set(estado.get("arquivos_processados", []))
     except Exception:
         return set()
 
 def fase1_download():
-    """Conecta na origem, filtra na RAM e baixa apenas arquivos brutos inéditos de forma silenciosa."""
+    """Conecta na origem via FTP, filtra na RAM e baixa apenas arquivos brutos inéditos."""
     host = os.getenv("EQUA_HOST")
-    port = int(os.getenv("EQUA_PORT","21"))
+    port = int(os.getenv("EQUA_PORT", "21"))
     user = os.getenv("EQUA_USER")
     password = os.getenv("EQUA_PASS")
     remote_dir = os.getenv("EQUA-MA_DIR")
@@ -33,7 +31,6 @@ def fase1_download():
     padrao_ja_renomeado = re.compile(r"^(\d+)_(\d+)_(\d+)_(.+)$")
     padrao_bruto_valido = re.compile(r"^(\d+)_(\d+)_([^_]+)$")
 
-    # Carrega a memória apenas UMA VEZ antes do loop
     arquivos_ja_processados = carregar_memoria_processados()
 
     try:
@@ -41,24 +38,26 @@ def fase1_download():
         #ftp.set_debuglevel(2)  # Exibe cada comando e resposta do servidor no terminal
         ftp.connect(host, port, timeout=30)
         ftp.login(user=user, passwd=password)
-        #ftp.set_pasv(False)    # Força o Modo Ativo caso as portas passivas estejam bloqueadas
+        ftp.set_pasv(False)    # Força o Modo Ativo caso as portas passivas estejam bloqueadas
         ftp.cwd(remote_dir)
 
-        arquivos_no_servidor = ftp.nlst()
+        arquivos_no_servidor = [
+            os.path.basename(item)
+            for item in ftp.nlst()
+            if os.path.basename(item) not in (".", "..")
+        ]
 
         if not arquivos_no_servidor:
             print("⚠️ A pasta remota da origem está vazia.")
         else:
             print(f"📦 Analisando {len(arquivos_no_servidor)} arquivo(s) na Origem...")
 
-            # Contadores para o sumário silencioso
             ign_renomeado = 0
             ign_antigo = 0
             ign_historico = 0
             baixados = 0
 
-            for item in arquivos_no_servidor:
-                nome_arquivo = os.path.basename(item)
+            for nome_arquivo in arquivos_no_servidor:
                 if padrao_ja_renomeado.match(nome_arquivo):
                     ign_renomeado += 1
                     continue
@@ -67,13 +66,10 @@ def fase1_download():
                     ign_antigo += 1
                     continue
 
-                # Busca instantânea na RAM, sem ler o disco rígido
                 if nome_arquivo in arquivos_ja_processados:
                     ign_historico += 1
                     continue
 
-                # Se é novo, faz o download e avisa na tela
-                #remote_path = f"{remote_dir}/{nome_arquivo}"
                 local_path = os.path.join(PASTA_TEMP, nome_arquivo)
 
                 with open(local_path, "wb") as arquivo_local:
@@ -82,18 +78,21 @@ def fase1_download():
                 print(f"⬇️ Baixado NOVO arquivo: {nome_arquivo}")
                 baixados += 1
 
-            # Sumário final limpo no terminal
             ignorados_total = ign_renomeado + ign_antigo + ign_historico
             if ignorados_total > 0:
                 print(f"🧹 Resumo da Origem: {ignorados_total} arquivo(s) ignorado(s) silenciosamente:")
                 print(f"   ↳ {ign_historico} já registrados no histórico local.")
                 print(f"   ↳ {ign_antigo} com nomenclatura antiga.")
                 print(f"   ↳ {ign_renomeado} já renomeados na origem.")
-            
+
             if baixados == 0:
                 print("✅ Nenhum arquivo novo pendente de download.")
 
-        ftp.quit()
+        try:
+            ftp.quit()
+        except Exception:
+            ftp.close()
+
         return True
 
     except Exception as e:
