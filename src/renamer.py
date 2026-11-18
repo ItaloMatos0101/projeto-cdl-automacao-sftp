@@ -1,7 +1,7 @@
 import os
 import re
 import shutil
-from state_manager import (
+from src.state_manager import (
     PASTA_TEMP, 
     PASTA_PROCESSADOS, 
     extrair_sequencial_do_txt, 

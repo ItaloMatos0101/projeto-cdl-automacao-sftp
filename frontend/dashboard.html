@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Controle - CDL SFTP</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: 40px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; font-size: 22px; margin-bottom: 10px; }
+        p { color: #666; font-size: 14px; }
+        .card { margin-top: 20px; padding: 20px; background: #fafbfc; border: 1px solid #e1e4e8; border-radius: 6px; }
+        button { background-color: #2ea44f; color: white; border: none; padding: 12px 20px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; width: 100%; transition: background 0.2s; }
+        button:hover { background-color: #2c974b; }
+        button:disabled { background-color: #94d3a2; cursor: not-allowed; }
+        #statusMensagem { margin-top: 15px; padding: 12px; border-radius: 6px; font-size: 14px; display: none; }
+        .sucesso { background-color: #dafbe1; color: #116329; border: 1px solid #ace4b8; }
+        .erro { background-color: #ffebe9; color: #cf222e; border: 1px solid #ffc1c0; }
+        .info { background-color: #ddf4ff; color: #0969da; border: 1px solid #b6e3ff; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Painel de Controle SFTP</h1>
+        <p>Interface de teste para acionamento manual da esteira de remessas da CDL.</p>
+        
+        <div class="card">
+            <button id="btnSincronizar">🚀 Executar Sincronização SFTP</button>
+            <div id="statusMensagem"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('btnSincronizar').addEventListener('click', async () => {
+            const botao = document.getElementById('btnSincronizar');
+            const statusDiv = document.getElementById('statusMensagem');
+            
+            // Estado de carregamento
+            botao.disabled = true;
+            botao.innerHTML = '🔄 Processando remessas...';
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'info';
+            statusDiv.innerHTML = 'Conectando aos servidores de origem e destino, por favor aguarde...';
+
+            try {
+                // Requisição POST para a API FastAPI rodando em localhost:8000
+                const resposta = await fetch('http://localhost:8000/api/executar-pipeline', {
+                    method: 'POST',
+                });
+                
+                const resultado = await resposta.json();
+                
+                if (resposta.ok) {
+                    statusDiv.className = 'sucesso';
+                    statusDiv.innerHTML = `✅ ${resultado.mensagem}`;
+                } else {
+                    statusDiv.className = 'erro';
+                    statusDiv.innerHTML = `❌ Falha: ${resultado.detail || 'Erro desconhecido no servidor.'}`;
+                }
+            } catch (erro) {
+                statusDiv.className = 'erro';
+                statusDiv.innerHTML = `❌ Erro de conexão: Não foi possível contatar a API no backend. O serviço está rodando?`;
+                console.error(erro);
+            } finally {
+                // Restaura o botão
+                botao.disabled = false;
+                botao.innerHTML = '🚀 Executar Sincronização SFTP';
+            }
+        });
+    </script>
+
+</body>
+</html>

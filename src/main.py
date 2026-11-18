@@ -1,7 +1,7 @@
-from state_manager import garantir_pastas_locais
-from download import fase1_download
-from renamer import fase2_renomear
-from upload import fase3_upload
+from src.state_manager import garantir_pastas_locais
+from src.download import fase1_download
+from src.renamer import fase2_renomear
+from src.upload import fase3_upload
 
 if __name__ == "__main__":
     garantir_pastas_locais()

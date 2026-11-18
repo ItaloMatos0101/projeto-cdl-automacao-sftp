@@ -3,7 +3,7 @@ import re
 import json
 from ftplib import FTP
 from dotenv import load_dotenv
-from state_manager import PASTA_TEMP, ARQUIVO_ESTADO
+from src.state_manager import PASTA_TEMP, ARQUIVO_ESTADO
 
 load_dotenv()
 

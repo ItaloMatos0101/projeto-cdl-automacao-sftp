@@ -2,7 +2,7 @@ import paramiko
 import os
 import re
 from dotenv import load_dotenv
-from state_manager import PASTA_TEMP
+from src.state_manager import PASTA_TEMP
 
 load_dotenv()
 
